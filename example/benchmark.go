@@ -10,9 +10,9 @@ import (
 	"github.com/yangbin1322/go-ddddocr/ddddocr"
 )
 
-func main1() {
+func main() {
 	// 设置 ONNX Runtime 路径
-	ddddocr.SetOnnxRuntimePath("./models/onnxruntime.dll")
+	//ddddocr.SetOnnxRuntimePath("./models/onnxruntime.dll")
 	fmt.Println("========================================")
 	fmt.Println("       Go-DdddOcr 并发测试")
 	fmt.Println("========================================")
@@ -20,15 +20,15 @@ func main1() {
 
 	// 测试 1: 单实例加锁并发
 	testSingleInstanceWithLock()
-
-	// 测试 2: 多实例并发（每个协程独立实例）
-	testMultipleInstances()
-
-	// 测试 3: 实例池并发
-	testInstancePool()
-
-	// 测试 4: 滑块识别并发
-	testSlideMatchConcurrent()
+	//
+	//// 测试 2: 多实例并发（每个协程独立实例）
+	//testMultipleInstances()
+	//
+	//// 测试 3: 实例池并发
+	//testInstancePool()
+	//
+	//// 测试 4: 滑块识别并发
+	//testSlideMatchConcurrent()
 }
 
 // ============================================================================
@@ -36,9 +36,9 @@ func main1() {
 // ============================================================================
 func testSingleInstanceWithLock() {
 	fmt.Println("=== 测试 1: 单实例 + 互斥锁 ===")
-	Options := ddddocr.DefaultOptions()
-	Options.ModelDir = "./models/"
-	ocr, err := ddddocr.New(Options)
+	//Options := ddddocr.DefaultOptions()
+	//Options.ModelDir = "./models/"
+	ocr, err := ddddocr.New(ddddocr.DefaultOptions())
 	if err != nil {
 		fmt.Printf("创建 OCR 失败: %v\n", err)
 		return

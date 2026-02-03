@@ -10,9 +10,12 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	"image/png"
+	"io"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -37,6 +40,32 @@ const (
 	RangeNonAlphaNum     = 7 // 除去字母数字的其他字符
 )
 
+// 模型下载配置
+const (
+	GitHubRepo = "yangbin1322/go-ddddocr"
+	ReleaseTag = "v1.0.1"
+	BaseURL    = "https://github.com/" + GitHubRepo + "/releases/download/" + ReleaseTag
+)
+
+// 默认模型目录
+var DefaultModelDir = "./models"
+
+// 模型文件列表
+var ModelFiles = map[string]string{
+	"common.onnx":        "52M",
+	"common_det.onnx":    "20M",
+	"common_old.onnx":    "13M",
+	"charsets_beta.json": "56K",
+	"charsets_old.json":  "56K",
+}
+
+// ONNX Runtime 文件
+var OnnxRuntimeFile = map[string]string{
+	"windows": "onnxruntime.dll",
+	"linux":   "libonnxruntime.so",
+	"darwin":  "libonnxruntime.dylib",
+}
+
 // HSV 颜色范围定义
 type HSVRange struct {
 	LowH, LowS, LowV    uint8
@@ -54,6 +83,127 @@ var DefaultColorRanges = map[string]HSVRange{
 	"purple": {130, 100, 100, 160, 255, 255}, // 紫色
 	"pink":   {140, 50, 100, 170, 255, 255},  // 粉色
 	"brown":  {10, 100, 50, 20, 255, 150},    // 棕色
+}
+
+// ============================================================================
+// 模型下载功能
+// ============================================================================
+
+// DownloadModels 下载所有模型文件到指定目录
+func DownloadModels(targetDir string) error {
+	fmt.Println("==========================================")
+	fmt.Println("🚀 go-ddddocr 模型文件自动下载")
+	fmt.Println("==========================================")
+
+	if targetDir == "" {
+		targetDir = DefaultModelDir
+	}
+
+	// 确保目录存在
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return fmt.Errorf("无法创建目录: %w", err)
+	}
+
+	// 下载模型文件
+	for file, size := range ModelFiles {
+		destPath := filepath.Join(targetDir, file)
+
+		if _, err := os.Stat(destPath); err == nil {
+			fmt.Printf("✅ %s 已存在，跳过\n", file)
+			continue
+		}
+
+		fmt.Printf("⬇️ 正在下载 %s (大小约 %s)...\n", file, size)
+
+		url := fmt.Sprintf("%s/%s", BaseURL, file)
+		if err := downloadFile(destPath, url); err != nil {
+			fmt.Printf("❌ %s 下载失败: %v\n", file, err)
+			continue
+		}
+		fmt.Printf("✨ %s 下载完成!\n", file)
+	}
+
+	// 下载 ONNX Runtime
+	onnxFile := getOnnxRuntimeFileName()
+	onnxPath := filepath.Join(targetDir, onnxFile)
+
+	if _, err := os.Stat(onnxPath); err == nil {
+		fmt.Printf("✅ %s 已存在，跳过\n", onnxFile)
+	} else {
+		fmt.Printf("⬇️ 正在下载 %s (大小约 14M)...\n", onnxFile)
+		url := fmt.Sprintf("%s/%s", BaseURL, onnxFile)
+		if err := downloadFile(onnxPath, url); err != nil {
+			fmt.Printf("❌ %s 下载失败: %v\n", onnxFile, err)
+		} else {
+			fmt.Printf("✨ %s 下载完成!\n", onnxFile)
+		}
+	}
+
+	fmt.Println("==========================================")
+	fmt.Printf("🎉 所有文件已准备就绪！存放在: %s\n", targetDir)
+	fmt.Println("==========================================")
+
+	return nil
+}
+
+// EnsureModels 确保模型文件存在，不存在则自动下载
+func EnsureModels(targetDir string) error {
+	if targetDir == "" {
+		targetDir = DefaultModelDir
+	}
+
+	// 检查必要文件是否存在
+	requiredFiles := []string{"common_old.onnx", "charsets_old.json"}
+	allExist := true
+
+	for _, file := range requiredFiles {
+		if _, err := os.Stat(filepath.Join(targetDir, file)); os.IsNotExist(err) {
+			allExist = false
+			break
+		}
+	}
+
+	// 检查 ONNX Runtime
+	onnxFile := getOnnxRuntimeFileName()
+	if _, err := os.Stat(filepath.Join(targetDir, onnxFile)); os.IsNotExist(err) {
+		allExist = false
+	}
+
+	if !allExist {
+		return DownloadModels(targetDir)
+	}
+
+	return nil
+}
+
+// getOnnxRuntimeFileName 获取当前平台的 ONNX Runtime 文件名
+func getOnnxRuntimeFileName() string {
+	if name, ok := OnnxRuntimeFile[runtime.GOOS]; ok {
+		return name
+	}
+	return "onnxruntime.dll"
+}
+
+// downloadFile 下载文件
+func downloadFile(destPath string, url string) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP 状态码错误: %d", resp.StatusCode)
+	}
+
+	out, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, resp.Body)
+	return err
 }
 
 // ============================================================================
@@ -131,8 +281,8 @@ func initOnnxRuntime() error {
 	var initErr error
 	initOnce.Do(func() {
 		if onnxRuntimePath == "" {
-			// 默认路径，根据系统调整
-			onnxRuntimePath = "onnxruntime.dll"
+			// 默认使用 models 目录下的库
+			onnxRuntimePath = filepath.Join(DefaultModelDir, getOnnxRuntimeFileName())
 		}
 		ort.SetSharedLibraryPath(onnxRuntimePath)
 		initErr = ort.InitializeEnvironment()
@@ -150,22 +300,41 @@ type Options struct {
 	ImportOnnxPath string // 自定义模型路径
 	CharsetsPath   string // 自定义字符集路径
 	ModelDir       string // 模型目录
+	AutoDownload   bool   // 自动下载模型（默认 true）
 }
 
 // DefaultOptions 默认选项
 func DefaultOptions() Options {
 	return Options{
-		Ocr:      true,
-		Det:      false,
-		Beta:     false,
-		UseGPU:   false,
-		DeviceID: 0,
-		ModelDir: ".",
+		Ocr:          true,
+		Det:          false,
+		Beta:         false,
+		UseGPU:       false,
+		DeviceID:     0,
+		ModelDir:     DefaultModelDir,
+		AutoDownload: true,
 	}
 }
 
 // New 创建识别器
 func New(opts Options) (*DdddOcr, error) {
+	// 设置默认模型目录
+	if opts.ModelDir == "" {
+		opts.ModelDir = DefaultModelDir
+	}
+
+	// 自动下载模型
+	if opts.AutoDownload && opts.ImportOnnxPath == "" {
+		if err := EnsureModels(opts.ModelDir); err != nil {
+			return nil, fmt.Errorf("模型下载失败: %w", err)
+		}
+	}
+
+	// 设置 ONNX Runtime 路径
+	if onnxRuntimePath == "" {
+		SetOnnxRuntimePath(filepath.Join(opts.ModelDir, getOnnxRuntimeFileName()))
+	}
+
 	if err := initOnnxRuntime(); err != nil {
 		return nil, fmt.Errorf("初始化 ONNX Runtime 失败: %w", err)
 	}
@@ -739,7 +908,6 @@ func (d *DdddOcr) SlideMatch(targetBytes, backgroundBytes []byte, simpleTarget b
 	bgEdge := cannyEdgeDetect(background, 100, 200)
 
 	// 2. 灰度转 RGB（与 Python 的 cv2.cvtColor(img, cv2.COLOR_GRAY2RGB) 对应）
-	// 这一步很重要！Python 是在 3 通道图像上做模板匹配
 	targetRGB := grayToRGB(targetEdge)
 	bgRGB := grayToRGB(bgEdge)
 
@@ -768,7 +936,6 @@ func cannyEdgeDetect(img image.Image, lowThreshold, highThreshold int) *image.Gr
 		gray[y] = make([]int, w)
 		for x := 0; x < w; x++ {
 			r, g, b, _ := img.At(x+bounds.Min.X, y+bounds.Min.Y).RGBA()
-			// OpenCV 使用 BGR，但灰度转换公式相同
 			gray[y][x] = int(0.299*float64(r>>8) + 0.587*float64(g>>8) + 0.114*float64(b>>8))
 		}
 	}
@@ -785,11 +952,8 @@ func cannyEdgeDetect(img image.Image, lowThreshold, highThreshold int) *image.Gr
 
 	for y := 1; y < h-1; y++ {
 		for x := 1; x < w-1; x++ {
-			// Sobel X
 			gx := -gray[y-1][x-1] - 2*gray[y][x-1] - gray[y+1][x-1] +
 				gray[y-1][x+1] + 2*gray[y][x+1] + gray[y+1][x+1]
-
-			// Sobel Y
 			gy := -gray[y-1][x-1] - 2*gray[y-1][x] - gray[y-1][x+1] +
 				gray[y+1][x-1] + 2*gray[y+1][x] + gray[y+1][x+1]
 
@@ -812,7 +976,6 @@ func cannyEdgeDetect(img image.Image, lowThreshold, highThreshold int) *image.Gr
 				continue
 			}
 
-			// 计算梯度方向
 			gx := float64(gradX[y][x])
 			gy := float64(gradY[y][x])
 			angle := math.Atan2(gy, gx) * 180 / math.Pi
@@ -821,7 +984,6 @@ func cannyEdgeDetect(img image.Image, lowThreshold, highThreshold int) *image.Gr
 			}
 
 			var q, r int
-			// 根据方向选择比较的邻居
 			if (angle >= 0 && angle < 22.5) || (angle >= 157.5 && angle <= 180) {
 				q = magnitude[y][x+1]
 				r = magnitude[y][x-1]
@@ -844,7 +1006,7 @@ func cannyEdgeDetect(img image.Image, lowThreshold, highThreshold int) *image.Gr
 
 	// 双阈值 + 滞后阈值
 	result := image.NewGray(bounds)
-	edge := make([][]int, h) // 0: none, 1: weak, 2: strong
+	edge := make([][]int, h)
 	for y := 0; y < h; y++ {
 		edge[y] = make([]int, w)
 	}
@@ -867,7 +1029,6 @@ func cannyEdgeDetect(img image.Image, lowThreshold, highThreshold int) *image.Gr
 		for y := 1; y < h-1; y++ {
 			for x := 1; x < w-1; x++ {
 				if edge[y][x] == 1 {
-					// 检查8邻域是否有强边缘
 					for dy := -1; dy <= 1; dy++ {
 						for dx := -1; dx <= 1; dx++ {
 							if edge[y+dy][x+dx] == 2 {
@@ -889,7 +1050,7 @@ func cannyEdgeDetect(img image.Image, lowThreshold, highThreshold int) *image.Gr
 	return result
 }
 
-// grayToRGB 灰度图转 RGB（模拟 cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)）
+// grayToRGB 灰度图转 RGB
 func grayToRGB(gray *image.Gray) *image.RGBA {
 	bounds := gray.Bounds()
 	rgb := image.NewRGBA(bounds)
@@ -920,7 +1081,6 @@ func templateMatchRGB(background, template *image.RGBA) image.Point {
 
 	tplSize := tplW * tplH
 
-	// 预计算模板数据（3通道）
 	tplR := make([]float64, tplSize)
 	tplG := make([]float64, tplSize)
 	tplB := make([]float64, tplSize)
@@ -944,7 +1104,6 @@ func templateMatchRGB(background, template *image.RGBA) image.Point {
 	meanG := sumG / n
 	meanB := sumB / n
 
-	// 计算模板的归一化数据和标准差
 	var tplVarR, tplVarG, tplVarB float64
 	for i := 0; i < tplSize; i++ {
 		tplR[i] -= meanR
@@ -963,10 +1122,8 @@ func templateMatchRGB(background, template *image.RGBA) image.Point {
 	maxVal := float64(-2)
 	maxLoc := image.Point{}
 
-	// 滑动窗口匹配
 	for y := 0; y <= bgH-tplH; y++ {
 		for x := 0; x <= bgW-tplW; x++ {
-			// 计算窗口均值
 			var wSumR, wSumG, wSumB float64
 			for ty := 0; ty < tplH; ty++ {
 				for tx := 0; tx < tplW; tx++ {
@@ -980,7 +1137,6 @@ func templateMatchRGB(background, template *image.RGBA) image.Point {
 			wMeanG := wSumG / n
 			wMeanB := wSumB / n
 
-			// 计算相关系数
 			var crossSum, winVar float64
 			for ty := 0; ty < tplH; ty++ {
 				for tx := 0; tx < tplW; tx++ {
@@ -1001,7 +1157,6 @@ func templateMatchRGB(background, template *image.RGBA) image.Point {
 				continue
 			}
 
-			// TM_CCOEFF_NORMED
 			ncc := crossSum / (winStd * tplStd)
 
 			if ncc > maxVal {
@@ -1015,29 +1170,21 @@ func templateMatchRGB(background, template *image.RGBA) image.Point {
 }
 
 // SlideComparison 滑块比较（图像差异算法）
-// 参数: targetBytes - 带缺口阴影的图片, backgroundBytes - 完整图片
-// 与 Python 版本行为一致：计算 background - target 的差异
 func (d *DdddOcr) SlideComparison(targetBytes, backgroundBytes []byte) (*SlideComparisonResult, error) {
-	// target: 带缺口阴影的图片（第一个参数）
 	target, _, err := image.Decode(bytes.NewReader(targetBytes))
 	if err != nil {
 		return nil, fmt.Errorf("解码目标图失败: %w", err)
 	}
 
-	// background: 完整图片（第二个参数）
 	background, _, err := image.Decode(bytes.NewReader(backgroundBytes))
 	if err != nil {
 		return nil, fmt.Errorf("解码背景图失败: %w", err)
 	}
 
-	// 获取尺寸
 	targetBounds := target.Bounds()
 	bgBounds := background.Bounds()
 
-	// 如果尺寸不一致，需要调整（Python 的 PIL 会自动处理）
-	// 通常带缺口的图较大，完整图可能需要缩放
 	if targetBounds.Dx() != bgBounds.Dx() || targetBounds.Dy() != bgBounds.Dy() {
-		// 将完整图缩放到与带缺口图相同的尺寸
 		background = resize.Resize(
 			uint(targetBounds.Dx()),
 			uint(targetBounds.Dy()),
@@ -1046,19 +1193,14 @@ func (d *DdddOcr) SlideComparison(targetBytes, backgroundBytes []byte) (*SlideCo
 		)
 	}
 
-	// 转换为 RGB（与 Python 的 convert("RGB") 对应）
 	targetRGB := toRGB(target)
 	backgroundRGB := toRGB(background)
 
-	// 计算图像差异（Python: ImageChops.difference(background, target)）
-	// 注意：Python 是 background - target，所以这里也要保持一致
 	diff := imageDifferenceRGB(backgroundRGB, targetRGB)
 
-	// 二值化处理（point(lambda x: 255 if x > 80 else 0)）
 	threshold := uint8(80)
 	binaryImg := binarizeRGB(diff, threshold)
 
-	// 查找缺口位置（使用 Python 完全一致的逻辑）
 	startX, startY := findGapPython(binaryImg, 5)
 
 	return &SlideComparisonResult{
@@ -1074,12 +1216,11 @@ func toRGB(img image.Image) *image.RGBA {
 	return rgba
 }
 
-// imageDifferenceRGB 计算两张 RGB 图像的差异（对应 ImageChops.difference）
+// imageDifferenceRGB 计算两张 RGB 图像的差异
 func imageDifferenceRGB(img1, img2 image.Image) *image.RGBA {
 	bounds := img1.Bounds()
 	bounds2 := img2.Bounds()
 
-	// 使用较小的尺寸
 	w := bounds.Dx()
 	h := bounds.Dy()
 	if bounds2.Dx() < w {
@@ -1096,7 +1237,6 @@ func imageDifferenceRGB(img1, img2 image.Image) *image.RGBA {
 			r1, g1, b1, _ := img1.At(x+bounds.Min.X, y+bounds.Min.Y).RGBA()
 			r2, g2, b2, _ := img2.At(x+bounds2.Min.X, y+bounds2.Min.Y).RGBA()
 
-			// 计算绝对差值
 			dr := absDiff(uint8(r1>>8), uint8(r2>>8))
 			dg := absDiff(uint8(g1>>8), uint8(g2>>8))
 			db := absDiff(uint8(b1>>8), uint8(b2>>8))
@@ -1115,7 +1255,7 @@ func absDiff(a, b uint8) uint8 {
 	return b - a
 }
 
-// binarizeRGB 对 RGB 图像进行二值化（每个通道独立处理）
+// binarizeRGB 对 RGB 图像进行二值化
 func binarizeRGB(img *image.RGBA, threshold uint8) *image.RGBA {
 	bounds := img.Bounds()
 	result := image.NewRGBA(bounds)
@@ -1125,7 +1265,6 @@ func binarizeRGB(img *image.RGBA, threshold uint8) *image.RGBA {
 			r, g, b, _ := img.At(x, y).RGBA()
 			r8, g8, b8 := uint8(r>>8), uint8(g>>8), uint8(b>>8)
 
-			// 每个通道独立二值化
 			if r8 > threshold {
 				r8 = 255
 			} else {
@@ -1149,7 +1288,7 @@ func binarizeRGB(img *image.RGBA, threshold uint8) *image.RGBA {
 	return result
 }
 
-// findGapPython 完全按照 Python 逻辑查找缺口位置
+// findGapPython 查找缺口位置
 func findGapPython(img image.Image, minCount int) (int, int) {
 	bounds := img.Bounds()
 	w := bounds.Dx()
@@ -1158,26 +1297,22 @@ func findGapPython(img image.Image, minCount int) (int, int) {
 	startX := 0
 	startY := 0
 
-	// 按列扫描（与 Python 的 for i in range(0, image.width) 对应）
 	for x := 0; x < w; x++ {
 		count := 0
 		for y := 0; y < h; y++ {
 			r, g, b, _ := img.At(x+bounds.Min.X, y+bounds.Min.Y).RGBA()
 			r8, g8, b8 := uint8(r>>8), uint8(g>>8), uint8(b>>8)
 
-			// 检查像素是否非黑色（与 Python 的 pixel != (0, 0, 0) 对应）
 			if r8 != 0 || g8 != 0 || b8 != 0 {
 				count++
-				// 记录第一个非黑色像素的 Y 坐标
 				if count == 1 && startY == 0 {
 					startY = y
 				}
 			}
 		}
 
-		// 如果这一列有足够多的非黑色像素，记录 X 坐标
 		if count >= minCount {
-			startX = x + 2 // Python 中是 start_x = i + 2
+			startX = x + 2
 			break
 		}
 	}
@@ -1194,10 +1329,7 @@ func pngRgbaBlackPreprocess(img image.Image) image.Image {
 	bounds := img.Bounds()
 	result := image.NewRGBA(bounds)
 
-	// 填充白色背景
 	draw.Draw(result, bounds, &image.Uniform{color.White}, image.Point{}, draw.Src)
-
-	// 绘制原图
 	draw.Draw(result, bounds, img, bounds.Min, draw.Over)
 
 	return result
@@ -1208,45 +1340,52 @@ func filterByColors(img image.Image, colors []string, customRanges map[string]HS
 	bounds := img.Bounds()
 	result := image.NewRGBA(bounds)
 
-	// 合并颜色范围
-	ranges := make(map[string]HSVRange)
-	for k, v := range DefaultColorRanges {
-		ranges[k] = v
-	}
-	for k, v := range customRanges {
-		ranges[k] = v
-	}
+	// 白色背景
+	draw.Draw(result, bounds, &image.Uniform{color.White}, image.Point{}, draw.Src)
 
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			r, g, b, a := img.At(x, y).RGBA()
+			r, g, b, _ := img.At(x, y).RGBA()
 			r8, g8, b8 := uint8(r>>8), uint8(g>>8), uint8(b>>8)
 
 			h, s, v := rgbToHSV(r8, g8, b8)
 
-			keep := false
+			match := false
 			for _, colorName := range colors {
-				if rng, ok := ranges[colorName]; ok {
-					if isInHSVRange(h, s, v, rng) {
-						keep = true
-						break
-					}
+				var hsvRange HSVRange
+				var ok bool
+
+				if customRanges != nil {
+					hsvRange, ok = customRanges[colorName]
 				}
-				// 处理红色的两段
+				if !ok {
+					hsvRange, ok = DefaultColorRanges[colorName]
+				}
+				if !ok {
+					continue
+				}
+
+				if h >= hsvRange.LowH && h <= hsvRange.HighH &&
+					s >= hsvRange.LowS && s <= hsvRange.HighS &&
+					v >= hsvRange.LowV && v <= hsvRange.HighV {
+					match = true
+					break
+				}
+
 				if colorName == "red" {
-					if rng, ok := ranges["red2"]; ok {
-						if isInHSVRange(h, s, v, rng) {
-							keep = true
+					if hsvRange2, ok := DefaultColorRanges["red2"]; ok {
+						if h >= hsvRange2.LowH && h <= hsvRange2.HighH &&
+							s >= hsvRange2.LowS && s <= hsvRange2.HighS &&
+							v >= hsvRange2.LowV && v <= hsvRange2.HighV {
+							match = true
 							break
 						}
 					}
 				}
 			}
 
-			if keep {
-				result.Set(x, y, color.RGBA{r8, g8, b8, uint8(a >> 8)})
-			} else {
-				result.Set(x, y, color.White)
+			if match {
+				result.Set(x, y, color.RGBA{r8, g8, b8, 255})
 			}
 		}
 	}
@@ -1255,101 +1394,80 @@ func filterByColors(img image.Image, colors []string, customRanges map[string]HS
 }
 
 // rgbToHSV RGB 转 HSV
-func rgbToHSV(r, g, b uint8) (h, s, v uint8) {
-	rf := float64(r) / 255.0
-	gf := float64(g) / 255.0
-	bf := float64(b) / 255.0
+func rgbToHSV(r, g, b uint8) (uint8, uint8, uint8) {
+	rf := float64(r) / 255
+	gf := float64(g) / 255
+	bf := float64(b) / 255
 
-	max := math.Max(rf, math.Max(gf, bf))
-	min := math.Min(rf, math.Min(gf, bf))
-	delta := max - min
+	maxVal := math.Max(rf, math.Max(gf, bf))
+	minVal := math.Min(rf, math.Min(gf, bf))
+	delta := maxVal - minVal
 
-	// V
-	v = uint8(max * 255)
+	var h, s, v float64
+	v = maxVal
 
-	// S
-	if max == 0 {
+	if maxVal == 0 {
 		s = 0
 	} else {
-		s = uint8((delta / max) * 255)
+		s = delta / maxVal
 	}
 
-	// H
-	var hf float64
 	if delta == 0 {
-		hf = 0
-	} else if max == rf {
-		hf = 60 * math.Mod((gf-bf)/delta, 6)
-	} else if max == gf {
-		hf = 60 * ((bf-rf)/delta + 2)
+		h = 0
+	} else if maxVal == rf {
+		h = 60 * math.Mod((gf-bf)/delta, 6)
+	} else if maxVal == gf {
+		h = 60 * ((bf-rf)/delta + 2)
 	} else {
-		hf = 60 * ((rf-gf)/delta + 4)
+		h = 60 * ((rf-gf)/delta + 4)
 	}
-	if hf < 0 {
-		hf += 360
-	}
-	h = uint8(hf / 2) // OpenCV 的 H 范围是 0-180
 
-	return
+	if h < 0 {
+		h += 360
+	}
+
+	return uint8(h / 2), uint8(s * 255), uint8(v * 255)
 }
 
-// isInHSVRange 检查是否在 HSV 范围内
-func isInHSVRange(h, s, v uint8, rng HSVRange) bool {
-	return h >= rng.LowH && h <= rng.HighH &&
-		s >= rng.LowS && s <= rng.HighS &&
-		v >= rng.LowV && v <= rng.HighV
-}
-
-// imageToGrayFloat32 图像转灰度 float32
-func imageToGrayFloat32(img image.Image, width, height int, useImportOnnx bool) []float32 {
-	out := make([]float32, height*width)
+// imageToGrayFloat32 图像转灰度浮点数组
+func imageToGrayFloat32(img image.Image, width, height int, normalize bool) []float32 {
+	data := make([]float32, width*height)
 	bounds := img.Bounds()
 
-	idx := 0
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
 			r, g, b, _ := img.At(x+bounds.Min.X, y+bounds.Min.Y).RGBA()
-			// 灰度计算
-			gray := float32(0.299*float64(r)+0.587*float64(g)+0.114*float64(b)) / 65535.0
+			gray := 0.299*float64(r>>8) + 0.587*float64(g>>8) + 0.114*float64(b>>8)
 
-			// 归一化
-			if useImportOnnx {
-				out[idx] = (gray - 0.456) / 0.224
+			if normalize {
+				data[y*width+x] = float32(gray / 255.0)
 			} else {
-				out[idx] = (gray - 0.5) / 0.5
+				data[y*width+x] = float32((gray/255.0 - 0.5) / 0.5)
 			}
-			idx++
 		}
 	}
-	return out
+	return data
 }
 
-// imageToRGBFloat32 图像转 RGB float32 (CHW 格式)
+// imageToRGBFloat32 图像转 RGB 浮点数组
 func imageToRGBFloat32(img image.Image, width, height int) []float32 {
-	out := make([]float32, 3*height*width)
+	data := make([]float32, 3*width*height)
 	bounds := img.Bounds()
-
-	mean := []float64{0.485, 0.456, 0.406}
-	std := []float64{0.229, 0.224, 0.225}
 
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
 			r, g, b, _ := img.At(x+bounds.Min.X, y+bounds.Min.Y).RGBA()
-			rf := float64(r) / 65535.0
-			gf := float64(g) / 65535.0
-			bf := float64(b) / 65535.0
-
 			idx := y*width + x
-			out[idx] = float32((rf - mean[0]) / std[0])
-			out[height*width+idx] = float32((gf - mean[1]) / std[1])
-			out[2*height*width+idx] = float32((bf - mean[2]) / std[2])
+			data[idx] = float32((float64(r>>8)/255.0 - 0.5) / 0.5)
+			data[width*height+idx] = float32((float64(g>>8)/255.0 - 0.5) / 0.5)
+			data[2*width*height+idx] = float32((float64(b>>8)/255.0 - 0.5) / 0.5)
 		}
 	}
-	return out
+	return data
 }
 
 // decodeOutputFloatFast 解码输出
-func decodeOutputFloatFast(output []float32, shape []int64, charsets []string, charsetLen int, allowedIndices []int) string {
+func decodeOutputFloatFast(output []float32, shape ort.Shape, charsets []string, charsetLen int, allowedIndices []int) string {
 	var sb strings.Builder
 	sb.Grow(16)
 
@@ -1429,42 +1547,35 @@ func softmax(input []float32) []float32 {
 // 目标检测辅助函数
 // ============================================================================
 
-// decodeImageCV 解码图片为 RGBA
 func decodeImageCV(data []byte) (image.Image, error) {
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
 
-	// 转换为 RGBA
 	bounds := img.Bounds()
 	rgba := image.NewRGBA(bounds)
 	draw.Draw(rgba, bounds, img, bounds.Min, draw.Src)
 	return rgba, nil
 }
 
-// preproc 预处理图像
 func preproc(img image.Image, inputSize [2]int) ([]float32, float64) {
 	bounds := img.Bounds()
 	origH := bounds.Dy()
 	origW := bounds.Dx()
 
-	// 计算缩放比例
 	r := math.Min(float64(inputSize[0])/float64(origH), float64(inputSize[1])/float64(origW))
 
 	newH := int(float64(origH) * r)
 	newW := int(float64(origW) * r)
 
-	// 缩放图像
 	resized := resize.Resize(uint(newW), uint(newH), img, resize.Bilinear)
 
-	// 创建填充图像 (114 灰色背景)
 	padded := make([]float32, 3*inputSize[0]*inputSize[1])
 	for i := range padded {
 		padded[i] = 114.0
 	}
 
-	// 填充数据 (CHW 格式)
 	resizedBounds := resized.Bounds()
 	for y := 0; y < newH; y++ {
 		for x := 0; x < newW; x++ {
@@ -1479,7 +1590,6 @@ func preproc(img image.Image, inputSize [2]int) ([]float32, float64) {
 	return padded, r
 }
 
-// demoPostprocess 后处理检测输出
 func demoPostprocess(outputs []float32, imgSize [2]int) [][]float32 {
 	strides := []int{8, 16, 32}
 
@@ -1498,7 +1608,6 @@ func demoPostprocess(outputs []float32, imgSize [2]int) [][]float32 {
 		}
 	}
 
-	// 解析输出
 	numAnchors := len(grids)
 	numClasses := len(outputs)/numAnchors - 5
 
@@ -1506,15 +1615,12 @@ func demoPostprocess(outputs []float32, imgSize [2]int) [][]float32 {
 	for i := 0; i < numAnchors; i++ {
 		pred := make([]float32, 5+numClasses)
 
-		// 中心点
 		pred[0] = (outputs[i*(5+numClasses)+0] + grids[i][0]) * expandedStrides[i]
 		pred[1] = (outputs[i*(5+numClasses)+1] + grids[i][1]) * expandedStrides[i]
 
-		// 宽高
 		pred[2] = float32(math.Exp(float64(outputs[i*(5+numClasses)+2]))) * expandedStrides[i]
 		pred[3] = float32(math.Exp(float64(outputs[i*(5+numClasses)+3]))) * expandedStrides[i]
 
-		// 置信度和类别
 		for j := 4; j < 5+numClasses; j++ {
 			pred[j] = outputs[i*(5+numClasses)+j]
 		}
@@ -1525,7 +1631,6 @@ func demoPostprocess(outputs []float32, imgSize [2]int) [][]float32 {
 	return predictions
 }
 
-// multiclassNMS 多类别 NMS
 func multiclassNMS(predictions [][]float32, ratio float64, origW, origH int, nmsThr, scoreThr float32) []BBox {
 	type detection struct {
 		box   BBox
@@ -1535,7 +1640,6 @@ func multiclassNMS(predictions [][]float32, ratio float64, origW, origH int, nms
 	var dets []detection
 
 	for _, pred := range predictions {
-		// 计算 objectness * class_score
 		objScore := pred[4]
 		maxClassScore := float32(0)
 		for j := 5; j < len(pred); j++ {
@@ -1549,14 +1653,12 @@ func multiclassNMS(predictions [][]float32, ratio float64, origW, origH int, nms
 			continue
 		}
 
-		// 转换为 xyxy 格式
 		cx, cy, w, h := pred[0], pred[1], pred[2], pred[3]
 		x1 := int((cx - w/2) / float32(ratio))
 		y1 := int((cy - h/2) / float32(ratio))
 		x2 := int((cx + w/2) / float32(ratio))
 		y2 := int((cy + h/2) / float32(ratio))
 
-		// 边界裁剪
 		if x1 < 0 {
 			x1 = 0
 		}
@@ -1576,12 +1678,10 @@ func multiclassNMS(predictions [][]float32, ratio float64, origW, origH int, nms
 		})
 	}
 
-	// 按分数排序
 	sort.Slice(dets, func(i, j int) bool {
 		return dets[i].score > dets[j].score
 	})
 
-	// NMS
 	var result []BBox
 	used := make([]bool, len(dets))
 
@@ -1605,7 +1705,6 @@ func multiclassNMS(predictions [][]float32, ratio float64, origW, origH int, nms
 	return result
 }
 
-// computeIoU 计算 IoU
 func computeIoU(a, b BBox) float32 {
 	x1 := max(a.X1, b.X1)
 	y1 := max(a.Y1, b.Y1)
@@ -1627,7 +1726,6 @@ func computeIoU(a, b BBox) float32 {
 // 滑块验证码辅助函数
 // ============================================================================
 
-// getTarget 提取滑块透明区域
 func getTarget(imgBytes []byte) (image.Image, int, int, error) {
 	img, _, err := image.Decode(bytes.NewReader(imgBytes))
 	if err != nil {
@@ -1642,7 +1740,6 @@ func getTarget(imgBytes []byte) (image.Image, int, int, error) {
 	startX = w
 	startY = h
 
-	// 检测 NRGBA 类型以获取 alpha 通道
 	nrgba, isNRGBA := img.(*image.NRGBA)
 	rgba, isRGBA := img.(*image.RGBA)
 
@@ -1682,7 +1779,6 @@ func getTarget(imgBytes []byte) (image.Image, int, int, error) {
 		return nil, 0, 0, fmt.Errorf("无法提取有效区域")
 	}
 
-	// 裁剪
 	cropped := image.NewRGBA(image.Rect(0, 0, endX-startX, endY-startY))
 	for y := startY; y < endY; y++ {
 		for x := startX; x < endX; x++ {
