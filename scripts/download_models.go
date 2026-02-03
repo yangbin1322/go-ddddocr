@@ -10,7 +10,7 @@ import (
 
 const (
 	githubRepo = "yangbin1322/go-ddddocr"
-	releaseTag = "v1.0.0"
+	releaseTag = "v1.0.1"
 	baseURL    = "https://github.com/" + githubRepo + "/releases/download/" + releaseTag
 	targetDir  = "./models" // 文件将统一下载到当前执行目录下的 models 文件夹
 )
