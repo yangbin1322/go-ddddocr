@@ -1,4 +1,4 @@
-module go-ddddocr
+module github.com/yangbin1322/go-ddddocr
 
 go 1.25
 
