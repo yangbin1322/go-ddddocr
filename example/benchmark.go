@@ -2,11 +2,12 @@ package main
 
 import (
 	"fmt"
-	"go-ddddocr/ddddocr"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/yangbin1322/go-ddddocr/ddddocr"
 )
 
 func main1() {

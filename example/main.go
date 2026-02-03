@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"go-ddddocr/ddddocr"
 	"os"
+
+	"github.com/yangbin1322/go-ddddocr/ddddocr"
 )
 
 func main() {
