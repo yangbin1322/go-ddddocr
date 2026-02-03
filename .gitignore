@@ -1,0 +1,44 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go build command
+/build/
+/dist/
+
+# Go workspace file
+go.work
+
+# Dependency directories
+vendor/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Test coverage
+*.out
+coverage.html
+
+# Model files (will be downloaded separately)
+*.onnx
+onnxruntime.dll
+
+# Local test files
+/testimg/*.png
+/testimg/*.jpg
+/testimg/*.jpeg
+/testimg/*.gif
