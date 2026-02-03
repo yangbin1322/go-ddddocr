@@ -13,10 +13,12 @@ func main() {
 	fmt.Println("=== 示例 1: 基础 OCR 识别 ===")
 
 	// 设置 ONNX Runtime 路径
-	ddddocr.SetOnnxRuntimePath("E:\\BaiduSyncdisk\\golang\\src\\go-ddddocr\\onnxruntime.dll")
+	ddddocr.SetOnnxRuntimePath("./models/onnxruntime.dll")
 
 	// 创建 OCR 识别器
-	ocr, err := ddddocr.New(ddddocr.DefaultOptions())
+	Options := ddddocr.DefaultOptions()
+	Options.ModelDir = "./models/"
+	ocr, err := ddddocr.New(Options)
 	if err != nil {
 		fmt.Printf("创建 OCR 失败: %v\n", err)
 		return
@@ -24,7 +26,7 @@ func main() {
 	defer ocr.Close()
 
 	// 读取图片
-	imageData, err := os.ReadFile("1.png")
+	imageData, err := os.ReadFile("./testimg/ocr.png")
 	if err != nil {
 		fmt.Printf("读取图片失败: %v\n", err)
 		return
@@ -67,7 +69,7 @@ func main() {
 	// ========================================================================
 	fmt.Println("=== 示例 3: 处理透明 PNG ===")
 
-	pngData, _ := os.ReadFile("1.png")
+	pngData, _ := os.ReadFile("./testimg/ocr.png")
 	result, _ = ocr.ClassificationWithOptions(pngData, ddddocr.ClassificationOptions{
 		PngFix: true,
 	})
@@ -78,7 +80,7 @@ func main() {
 	// ========================================================================
 	fmt.Println("=== 示例 4: 颜色过滤 ===")
 
-	colorImage, _ := os.ReadFile("1.png")
+	colorImage, _ := os.ReadFile("./testimg/ocr.png")
 	result, _ = ocr.ClassificationWithOptions(colorImage, ddddocr.ClassificationOptions{
 		Colors: []string{"black"},
 	})
@@ -114,7 +116,9 @@ func main() {
 
 	betaOpts := ddddocr.DefaultOptions()
 	betaOpts.Beta = true
+	betaOpts.ModelDir = "./models/"
 	betaOcr, err := ddddocr.New(betaOpts)
+
 	if err != nil {
 		fmt.Printf("创建 Beta OCR 失败: %v\n", err)
 	} else {
@@ -131,13 +135,15 @@ func main() {
 	detOpts := ddddocr.DefaultOptions()
 	detOpts.Ocr = false
 	detOpts.Det = true
+	detOpts.ModelDir = "./models/"
+
 	det, err := ddddocr.New(detOpts)
 	if err != nil {
 		fmt.Printf("创建检测器失败: %v\n", err)
 	} else {
 		defer det.Close()
 
-		detImage, _ := os.ReadFile("dx1.jpg")
+		detImage, _ := os.ReadFile("./testimg/dx1.jpg")
 		bboxes, err := det.Detection(detImage)
 		if err != nil {
 			fmt.Printf("检测失败: %v\n", err)
@@ -158,14 +164,15 @@ func main() {
 	slideOpts := ddddocr.DefaultOptions()
 	slideOpts.Ocr = false
 	slideOpts.Det = false
+	slideOpts.ModelDir = "./models/"
 	slide, err := ddddocr.New(slideOpts)
 	if err != nil {
 		fmt.Printf("创建滑块识别器失败: %v\n", err)
 	} else {
 		defer slide.Close()
 
-		targetBytes, _ := os.ReadFile("slideImage4.png")
-		bgBytes, _ := os.ReadFile("bgImage4.png")
+		targetBytes, _ := os.ReadFile("./testimg/slideImage.png")
+		bgBytes, _ := os.ReadFile("./testimg/bgImage.png")
 
 		// 有透明背景的滑块
 		matchResult, err := slide.SlideMatch(targetBytes, bgBytes, false)
@@ -192,9 +199,8 @@ func main() {
 	fmt.Println("=== 示例 9: 滑块验证码 (图像差异) ===")
 
 	if slide != nil {
-		gapImage, _ := os.ReadFile("bgImage2.png")
-		fullImage, _ := os.ReadFile("滑块完整背景图3.jpg")
-		fmt.Println(len(gapImage), len(fullImage))
+		gapImage, _ := os.ReadFile("./testimg/bgImage.png")
+		fullImage, _ := os.ReadFile("./testimg/滑块完整背景图.jpg")
 		compResult, err := slide.SlideComparison(gapImage, fullImage)
 		if err != nil {
 			fmt.Printf("图像比较失败: %v\n", err)

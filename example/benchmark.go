@@ -9,10 +9,9 @@ import (
 	"time"
 )
 
-func main() {
+func main1() {
 	// 设置 ONNX Runtime 路径
-	ddddocr.SetOnnxRuntimePath("E:\\BaiduSyncdisk\\golang\\src\\go-ddddocr\\onnxruntime.dll")
-
+	ddddocr.SetOnnxRuntimePath("./models/onnxruntime.dll")
 	fmt.Println("========================================")
 	fmt.Println("       Go-DdddOcr 并发测试")
 	fmt.Println("========================================")
@@ -36,15 +35,16 @@ func main() {
 // ============================================================================
 func testSingleInstanceWithLock() {
 	fmt.Println("=== 测试 1: 单实例 + 互斥锁 ===")
-
-	ocr, err := ddddocr.New(ddddocr.DefaultOptions())
+	Options := ddddocr.DefaultOptions()
+	Options.ModelDir = "./models/"
+	ocr, err := ddddocr.New(Options)
 	if err != nil {
 		fmt.Printf("创建 OCR 失败: %v\n", err)
 		return
 	}
 	defer ocr.Close()
 
-	imageData, err := os.ReadFile("1.png")
+	imageData, err := os.ReadFile("./testimg/ocr.png")
 	if err != nil {
 		fmt.Printf("读取图片失败: %v\n", err)
 		return
@@ -97,7 +97,7 @@ func testSingleInstanceWithLock() {
 func testMultipleInstances() {
 	fmt.Println("=== 测试 2: 多实例并发 ===")
 
-	imageData, err := os.ReadFile("1.png")
+	imageData, err := os.ReadFile("./testimg/ocr.png")
 	if err != nil {
 		fmt.Printf("读取图片失败: %v\n", err)
 		return
@@ -117,7 +117,9 @@ func testMultipleInstances() {
 			defer wg.Done()
 
 			// 每个协程创建自己的实例
-			ocr, err := ddddocr.New(ddddocr.DefaultOptions())
+			Options := ddddocr.DefaultOptions()
+			Options.ModelDir = "./models/"
+			ocr, err := ddddocr.New(Options)
 			if err != nil {
 				fmt.Printf("  协程 %d 创建 OCR 失败: %v\n", id, err)
 				atomic.AddInt64(&errorCount, int64(iterations))
@@ -164,8 +166,10 @@ func NewOcrPool(size int) (*OcrPool, error) {
 		size: size,
 	}
 
+	Options := ddddocr.DefaultOptions()
+	Options.ModelDir = "./models/"
 	for i := 0; i < size; i++ {
-		ocr, err := ddddocr.New(ddddocr.DefaultOptions())
+		ocr, err := ddddocr.New(Options)
 		if err != nil {
 			pool.Close()
 			return nil, err
@@ -202,7 +206,7 @@ func testInstancePool() {
 	}
 	defer pool.Close()
 
-	imageData, err := os.ReadFile("1.png")
+	imageData, err := os.ReadFile("./testimg/ocr.png")
 	if err != nil {
 		fmt.Printf("读取图片失败: %v\n", err)
 		return
@@ -259,13 +263,13 @@ func testInstancePool() {
 func testSlideMatchConcurrent() {
 	fmt.Println("=== 测试 4: 滑块识别并发 ===")
 
-	targetBytes, err := os.ReadFile("slideImage4.png")
+	targetBytes, err := os.ReadFile("./testimg/slideImage.png")
 	if err != nil {
 		fmt.Printf("读取滑块图失败: %v\n", err)
 		return
 	}
 
-	bgBytes, err := os.ReadFile("bgImage4.png")
+	bgBytes, err := os.ReadFile("./testimg/bgImage.png")
 	if err != nil {
 		fmt.Printf("读取背景图失败: %v\n", err)
 		return
@@ -288,6 +292,7 @@ func testSlideMatchConcurrent() {
 			opts := ddddocr.DefaultOptions()
 			opts.Ocr = false
 			opts.Det = false
+			opts.ModelDir = "./models/"
 			slide, err := ddddocr.New(opts)
 			if err != nil {
 				fmt.Printf("  协程 %d 创建滑块识别器失败: %v\n", id, err)

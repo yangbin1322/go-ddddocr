@@ -34,11 +34,11 @@ Thumbs.db
 coverage.html
 
 # Model files (will be downloaded separately)
-*.onnx
-onnxruntime.dll
+#*.onnx
+#onnxruntime.dll
 
 # Local test files
-/testimg/*.png
-/testimg/*.jpg
-/testimg/*.jpeg
-/testimg/*.gif
+#/testimg/*.png
+#/testimg/*.jpg
+#/testimg/*.jpeg
+#/testimg/*.gif
